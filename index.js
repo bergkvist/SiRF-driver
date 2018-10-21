@@ -1,7 +1,13 @@
 const SerialPort = require('serialport')
 const binary = require('binary')
 const { EventEmitter } = require('events')
+
 const messageTypes = require('./messageTypes')
+
+const NOT_FOUND = -1
+const START_SEQ = 'a0a2'
+const END_SEQ = 'b0b3'
+
 const port = new SerialPort('/dev/ttyUSB0', { baudRate: 4800 })
 const readPort = () => new Promise(resolve => port.once('data', data => resolve(data.toString('hex'))))
 
@@ -24,11 +30,11 @@ const messageEmitter = new EventEmitter()
 
 function command(payload) {
     const data = {
-        start: 'a0a2',
+        start: START_SEQ,
         length: Buffer.from(payload, 'hex').length,
         payload,
         checksum: checksum(payload),
-        end: 'b0b3'
+        end: END_SEQ
     }
     return Buffer.from(data.start + data.length + data.payload + data.checksum + data.end, 'hex')
 }
@@ -43,12 +49,16 @@ function checksum(payload) {
     return `0000${checksum.toString(16)}`.slice(-4)
 }
 
-async function * rawMessages() {  /* Excludes start and stop bytes */
-    
-    const NOT_FOUND = -1
-    const START_SEQ = 'a0a2'
-    const END_SEQ = 'b0b3'
-    
+function writeCommand(payload) { 
+    return new Promise((resolve, reject) => {
+        port.write(command(payload), err => {
+            if (err) return reject(Error('Error on write:', err.message))
+            resolve('message written!')
+        })
+    })
+}
+
+async function * rawMessages() {  /* Excludes start and stop bytes */  
     let message = ''
     while(true) {
         const data = await readPort()
@@ -86,43 +96,45 @@ async function * payloads() {
 }
 
 function pollSoftwareVersion() {
-    return new Promise((resolve, reject) => {
-        port.write(command('8400'))
-
-        messageEmitter.once(0x06, response => {
+    return new Promise(async (resolve, reject) => {
+        messageEmitter.once(6, response => {
             console.log(response)
             resolve(response)
         })
 
+        await writeCommand('8400')
+
         setTimeout(() => reject(Error('pollSoftwareVersion: TIMEOUT')), 3000) // 3 second timeout
     })
 }
+
+messageEmitter.on(2, msg => {
+    const data = Buffer.from(msg, 'hex')
+    const obj = binary.parse(data)
+        .word8lu('id')
+        .word32ls('x')
+        .word32ls('y')
+        .word32ls('z')
+        .word16ls('vx')
+        .word16ls('vy')
+        .word16ls('vz')
+        .vars
+
+    obj.type = messageTypes[data[0]].name
+    console.log(obj)    
+})
 
 
 ;(async () => {
     for await (const msg of payloads()) {
         const msgId = Buffer.from(msg, 'hex')[0]
         messageEmitter.emit(msgId, msg)
-
-        if (msgId === 2) {
-            console.log(binary.parse(Buffer.from(msg, 'hex'))
-                .word8lu('id')
-                .word32ls('x')
-                .word32ls('y')
-                .word32ls('z')
-                .word16ls('vx')
-                .word16ls('vy')
-                .word16ls('vz')
-                .vars)
-        }
-
-        /*
         if (msgId in messageTypes) {
             const name = messageTypes[msgId].name
             console.log(`[${msgId}] ${name}: ${msg}`)
         } else {
             console.log(`[${msgId}] UNKNOWN msgId: ${msg}`)
-        }*/
+        }
     }
 })()
 
