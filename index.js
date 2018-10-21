@@ -7,6 +7,21 @@ const readPort = () => new Promise(resolve => port.once('data', data => resolve(
 
 const messageEmitter = new EventEmitter()
 
+/**
+ * All Serial "packets" are shaped like this:
+ * +--------+--------+---------+----------+--------+
+ * | START  | LENGTH | PAYLOAD | CHECKSUM | END    |
+ * +--------+--------+---------+----------+--------+
+ * | 0xA0A2 |  2 B   |   (1)   |   2 B    | 0xB0B3 |
+ * +--------+--------+---------+----------+--------+
+ * 
+ * (1) Max payload length: 2¹⁰-1 (< 1023)
+ * - Length and checksum are always 2 bytes
+ * - Start and end are two bytes, and always the same ones,
+ *   as can be seen above.
+ */
+
+
 function command(payload) {
     const data = {
         start: 'a0a2',
