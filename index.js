@@ -23,7 +23,7 @@ function checksum(payload) {
     let checksum = 0
     for (let i = 0; i < bufferPayload.length; i++) {
         checksum += Number(bufferPayload[i])
-        checksum = checksum & 2e15 - 1
+        checksum = checksum & (2**15 - 1)
     }
     return `0000${checksum.toString(16)}`.slice(-4)
 }
